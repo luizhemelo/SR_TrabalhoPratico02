@@ -318,7 +318,7 @@ class SimilarityPredict:
         div = 0
         if userID not in userItems:  # Cold-Start case
             rt = content['imdbRating'][itemID]
-            if rt==0: return 6.75
+            if rt==0: return 6.53
             else: return rt
         for item in userItems[userID]:  # run the prediction formula
             st = itemID + item[0]
