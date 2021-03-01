@@ -1,9 +1,17 @@
-import sys
-import json
+"""
+Luiz Henrique de Melo Santos - 2017014464
+Recommendation Systems, 2020/2 - Rodrygo Santos
+
+Usage:
+$ python3 main.py content.csv ratings.csv targets.csv
+"""
+
+import sys  # receive input parameters
+import json  # process content input
 import numpy as np
 import pandas as pd
 from math import log
-from gc import collect
+from gc import collect  # free unreferenced memory
 from dateutil.parser import parse
 
 
@@ -34,7 +42,7 @@ def read_content(path):
             content[itemId] += data.get('imdbRating', '') + ';;'
             content[itemId] += data.get('Type', '') + ';;'
             content[itemId] += data.get('Plot', '')
-    df = pd.DataFrame(content, index=[0]).transpose()
+    df = pd.DataFrame(content, index=[0]).transpose()  # create pandas.DataFrame
     df['itemId'] = df.index
     df = pd.concat([df, df[0].str.split(';;', expand=True)], axis=1, ignore_index=True)
     df = df.drop([0,1], axis=1)
@@ -43,8 +51,8 @@ def read_content(path):
                   'Language','Awards','Poster','Metascore','Country','imdbRating','Type','Plot']
     return df
 
-ratings = pd.read_csv('./data/ratings.csv')
-content = read_content('./data/content.csv')
+content = read_content(sys.argv[1])
+ratings = pd.read_csv(sys.argv[2])
 
 # separate first column in ratings
 sep = ratings['UserId:ItemId'].str.split(':', expand=True)
@@ -61,14 +69,14 @@ def feature_extraction(content):
     ln = content.shape[0]
     content = content.replace(['N/A', ''], 0)
 
-    # -- Year
+    # -- Year - transform the elements to numeric categories
     content['Year'] = pd.to_numeric(content['Year'], downcast='integer')
 
-    # -- Rated
+    # -- Rated - One-Hot Encoding
     rated = pd.get_dummies(content['Rated'], prefix='Rated')
     content = pd.concat([content, rated], axis=1)
 
-    # -- Released
+    # -- Released - creates 'year', 'month' and 'day' features
     content['Released_year'] = 0
     content['Released_month'] = 0
     content['Released_day'] = 0
@@ -80,7 +88,7 @@ def feature_extraction(content):
             content.loc[i, 'Released_month'] = prs.month
             content.loc[i, 'Released_day'] = prs.day
 
-    # -- Runtime
+    # -- Runtime - creates 'hour' and 'minutes' features
     content['Runtime_min'] = 0
     content['Runtime_hour'] = 0
     for i in range(ln):
@@ -97,7 +105,7 @@ def feature_extraction(content):
                 content.loc[i, 'Runtime_min'] = minutes
                 content.loc[i, 'Runtime_hour'] = hour
 
-    # -- Languages
+    # -- Languages - categorizes the elements
     for i in range(ln):
         cont = content['Language'][i]
         if cont=='English':
@@ -112,10 +120,10 @@ def feature_extraction(content):
             content.loc[i, 'Language'] = 0
     content['Language'] = pd.to_numeric(content['Language'], downcast='integer')
 
-    # -- Metascore
+    # -- Metascore - transform the elements to numeric values
     content['Metascore'] = pd.to_numeric(content['Metascore'], downcast='integer')
 
-    # -- Country
+    # -- Country - categorizes the elements
     for i in range(ln):
         cont = content['Country'][i]
         if cont=='USA':
@@ -130,10 +138,10 @@ def feature_extraction(content):
             content.loc[i, 'Country'] = 0
     content['Country'] = pd.to_numeric(content['Country'], downcast='integer')
 
-    # -- imdbRating
+    # -- imdbRating - transform the elements to numeric categories
     content['imdbRating'] = pd.to_numeric(content['imdbRating'], downcast='integer')
 
-    # -- Type
+    # -- Type - categorizes the elements
     content['Type'] = content['Type'].replace(['movie'], 1)
     content['Type'] = content['Type'].replace(['episode'], 2)
     content['Type'] = content['Type'].replace(['series'], 3)
@@ -153,6 +161,8 @@ content = feature_extraction(content)
 
 """
 TF-IDF APPROACH
+
+ATENTION: TfIdf class based on source-code presented in: https://streamsql.io/blog/tf-idf-from-scratch
 """
 class TfIdf:
     def __init__(self, content, length):
@@ -161,21 +171,24 @@ class TfIdf:
                      for row in content['combinedFeatures']]
         self.data_len = len(data)
         
+        # compute the tf values for each combine features in movies dataset
         tfDict = []
         for row in data:
             tfDict.append(self.computeReviewTFDict(row))
             
-        #Stores the review count dictionary
+        # stores the review count dictionary
         countDict = self.computeCountDict(tfDict)
         
-        #Stores the idf dictionary
+        # stores the idf dictionary
         self.idfDict = self.computeIDFDict(countDict)
-            
+        
+        # compute tfidf for combined features in movies dataset
         tfidfDict = self.computeReviewTFIDFDict( self.computeIDFDict( self.computeCountDict(tfDict) ) )
         
-        #Stores the TF-IDF dictionaries
+        # stores the TF-IDF dictionaries
         tfidfDict = [self.computeReviewTFIDFDict(review) for review in tfDict]
         
+        # create the matrix os tfidf values
         wordDict = sorted(countDict.keys())
         del self.data_len,self.idfDict
         self.tfidfVector = [self.computeTFIDFVector(review, wordDict)[:length] for review in tfidfDict]
@@ -288,12 +301,13 @@ del ratings
 """
 MAKING PREDICTIONS
 """
-class CosineSimilarityPredict:
+class SimilarityPredict:
     """
     Prediction of item scores from user id and item
     """
     
     def __init__(self, itemsDict):
+        # create a cache for norm and for similarities values - improves execution time
         self.similarities = dict()
         self.norms = dict()
         for key in itemsDict.keys():
@@ -302,20 +316,20 @@ class CosineSimilarityPredict:
     def predict(self, userID, itemID):
         num = 0
         div = 0
-        if userID not in userItems:
+        if userID not in userItems:  # Cold-Start case
             rt = content['imdbRating'][itemID]
             if rt==0: return 6.75
             else: return rt
-        for item in userItems[userID]:
+        for item in userItems[userID]:  # run the prediction formula
             st = itemID + item[0]
-            if st not in self.similarities:
-                self.similarities[st] = (np.dot(itemsDict[itemID],itemsDict[item[0]]) / (self.norms[itemID]*self.norms[item[0]]))
+            if st not in self.similarities:  # checks if similarity has already been calculated
+                self.similarities[st] = np.dot(itemsDict[itemID],itemsDict[item[0]]) / (self.norms[itemID]*self.norms[item[0]])
             num += self.similarities[st] * item[1]
             div += self.similarities[st]
-        return num/div
+        return num/div  # return the weighted avarage
 
 # reading targets dataset
-targets = pd.read_csv('./data/targets.csv')
+targets = pd.read_csv(sys.argv[3])
 # separate first column in targets
 sep = targets['UserId:ItemId'].str.split(':', expand=True)
 sep.columns = ['UserId', 'ItemId']
@@ -324,7 +338,7 @@ targets = pd.concat([targets, sep], axis=1)
 targets = targets.drop(['UserId:ItemId'], axis=1)
 
 # generate output
-cs = CosineSimilarityPredict(itemsDict)
+cs = SimilarityPredict(itemsDict)
 sys.stdout.write('UserId:ItemId,Prediction\n')
 for i in targets.index:
     userID = targets['UserId'][i]
@@ -333,5 +347,5 @@ for i in targets.index:
     sys.stdout.write(':')
     sys.stdout.write(itemID)
     sys.stdout.write(',')
-    sys.stdout.write(str(cs.predict(userID, itemID)))
+    sys.stdout.write(str(cs.predict(userID, itemID)))  # make prediction for each input in targets
     sys.stdout.write('\n')
